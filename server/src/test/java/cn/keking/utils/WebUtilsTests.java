@@ -21,4 +21,20 @@ public class WebUtilsTests {
         String out = "https://file.keking.cn/demo/%23hello%26world.txt?param0=0&param1=1";
         assert WebUtils.encodeUrlFileName(in).equals(out);
     }
+
+    @Test
+    void textPlainIsNotRejectedByMimeTypeAlone() {
+        assert WebUtils.isValidMimeType("text/plain", "xlsx");
+        assert WebUtils.isValidMimeType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx");
+        assert !WebUtils.isValidMimeType("text/html", "xlsx");
+        assert !WebUtils.isValidMimeType("application/json", "xlsx");
+    }
+
+    @Test
+    void xlsxMagicAcceptsZipHeaderEvenIfMimeIsPlainText() {
+        byte[] zipHeader = new byte[]{'P', 'K', 0x03, 0x04, 0, 0, 0, 0};
+        assert WebUtils.matchesExpectedBinaryMagic("xlsx", zipHeader, 4);
+        assert !WebUtils.matchesExpectedBinaryMagic("xlsx", "not a file".getBytes(), 8);
+        assert !WebUtils.matchesExpectedBinaryMagic("xlsx", "<html>xx".getBytes(), 8);
+    }
 }

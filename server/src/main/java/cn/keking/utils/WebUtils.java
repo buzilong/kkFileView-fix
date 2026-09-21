@@ -528,11 +528,61 @@ public class WebUtils {
             return true;
         }
 
-        // 如果检测到是HTML、文本或JSON格式，则认为是错误响应
+        // HTML/JSON 基本可以认定是错误页；text/plain 常见于 MinIO/OSS 误标 xlsx，不能直接拒绝
         String lowerContentType = contentType.toLowerCase();
         return !lowerContentType.contains("text/html")
-                && !lowerContentType.contains("text/plain")
                 && !lowerContentType.contains("application/json");
+    }
+
+    public static boolean isPlainTextMime(String contentType) {
+        return contentType != null && contentType.toLowerCase().contains("text/plain");
+    }
+
+    /**
+     * MinIO 等常把 xlsx 标成 text/plain。用文件头判断是不是真正的 Office/压缩包。
+     */
+    public static boolean matchesExpectedBinaryMagic(String suffix, byte[] header, int length) {
+        if (header == null || length < 2) {
+            return false;
+        }
+        String lowerSuffix = suffix == null ? "" : suffix.toLowerCase();
+        boolean zipMagic = header[0] == 'P' && header[1] == 'K';
+        boolean oleMagic = length >= 4
+                && (header[0] & 0xFF) == 0xD0
+                && (header[1] & 0xFF) == 0xCF
+                && (header[2] & 0xFF) == 0x11
+                && (header[3] & 0xFF) == 0xE0;
+        switch (lowerSuffix) {
+            case "xlsx":
+            case "xls":
+            case "docx":
+            case "doc":
+            case "pptx":
+            case "ppt":
+            case "wps":
+            case "zip":
+                return zipMagic || oleMagic;
+            case "pdf":
+                return length >= 4 && header[0] == '%' && header[1] == 'P' && header[2] == 'D' && header[3] == 'F';
+            case "rar":
+                return length >= 4 && header[0] == 'R' && header[1] == 'a' && header[2] == 'r' && header[3] == '!';
+            case "psd":
+                return length >= 4 && header[0] == '8' && header[1] == 'B' && header[2] == 'P' && header[3] == 'S';
+            default:
+                return !looksLikeTextError(header, length);
+        }
+    }
+
+    private static boolean looksLikeTextError(byte[] header, int length) {
+        int i = 0;
+        while (i < length && (header[i] == ' ' || header[i] == '\t' || header[i] == '\n' || header[i] == '\r')) {
+            i++;
+        }
+        if (i >= length) {
+            return true;
+        }
+        byte b = header[i];
+        return b == '<' || b == '{' || b == '[';
     }
 
     /**

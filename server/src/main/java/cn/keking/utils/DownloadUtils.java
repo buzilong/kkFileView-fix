@@ -10,9 +10,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.client.HttpClientErrorException;
 
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
@@ -85,6 +87,7 @@ public class DownloadUtils {
 
                     HttpRequestUtils.executeHttpRequest(url, httpClient, fileAttribute, responseWrapper -> {
                         String contentType = responseWrapper.getContentType();
+                        InputStream inputStream = responseWrapper.getInputStream();
                         if (WebUtils.isMimeCheckRequired(fileSuffix)) {
                             if (!WebUtils.isValidMimeType(contentType, fileSuffix)) {
                                 logger.error("文件类型错误，期望二进制文件但接收到文本类型，url: {}, Content-Type: {}",
@@ -93,8 +96,26 @@ public class DownloadUtils {
                                 mimeErrorMessage[0] = "期望二进制文件但接收到文本类型，Content-Type: " + contentType;
                                 return;
                             }
+                            // MinIO/OSS 常把 xlsx 标成 text/plain，用文件头再确认一次
+                            if (WebUtils.isPlainTextMime(contentType)) {
+                                BufferedInputStream bufferedInputStream = new BufferedInputStream(inputStream);
+                                bufferedInputStream.mark(16);
+                                byte[] header = new byte[8];
+                                int read = bufferedInputStream.read(header);
+                                bufferedInputStream.reset();
+                                if (!WebUtils.matchesExpectedBinaryMagic(fileSuffix, header, read)) {
+                                    logger.error("文件类型错误，期望二进制文件但接收到文本类型，url: {}, Content-Type: {}",
+                                            finalUrlStr, contentType);
+                                    hasMimeError[0] = true;
+                                    mimeErrorMessage[0] = "期望二进制文件但接收到文本类型，Content-Type: " + contentType;
+                                    return;
+                                }
+                                logger.warn("文件 Content-Type 为 text/plain，但文件头符合 {}，继续下载。url: {}",
+                                        fileSuffix, finalUrlStr);
+                                inputStream = bufferedInputStream;
+                            }
                         }
-                        FileUtils.copyToFile(responseWrapper.getInputStream(), realFile);
+                        FileUtils.copyToFile(inputStream, realFile);
                     });
 
                     if (hasMimeError[0]) {
